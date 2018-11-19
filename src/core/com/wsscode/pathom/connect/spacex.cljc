@@ -1,15 +1,15 @@
 (ns com.wsscode.pathom.connect.spacex
-  (:require [clojure.core.async :refer [go timeout <! #?(:clj <!!)]]
-            [com.wsscode.pathom.connect :as pc]
-            [com.wsscode.pathom.core :as p]
-            [com.wsscode.pathom.diplomat.http :as p.http]
-            [com.wsscode.pathom.diplomat.http.fetch :as p.http.fetch]
+  (:require [clojure.core.async :refer [timeout <! #?(:clj <!!)]]
             [clojure.string :as str]
-            [clojure.core.async :as async]))
+            [#?(:clj  com.wsscode.common.async-clj
+                :cljs com.wsscode.common.async-cljs)
+             :refer [go-catch <? let-chan chan? <?maybe <!maybe go-promise]]
+            [com.wsscode.pathom.connect :as pc]
+            [com.wsscode.pathom.diplomat.http :as p.http]))
 
 ;region entity helpers
 (defn adapt-key [k]
-  (str/replace-all k #"_" "-"))
+  (str/replace k #"_" "-"))
 
 (defn set-ns
   "Set the namespace of a keyword"
@@ -171,9 +171,9 @@
 (pc/defresolver all-launches
   [env _]
   {::pc/output [{:spacex/all-launches launch-out}]}
-  (go
+  (go-catch
     (->> (p.http/request env "https://api.spacexdata.com/v3/launches"
-           {::p.http/accept ::p.http/json}) <!
+           {::p.http/accept ::p.http/json}) <?maybe
          ::p.http/body
          (mapv adapt-launch)
          (hash-map :spacex/all-launches))))
@@ -181,9 +181,9 @@
 (pc/defresolver past-launches
   [env _]
   {::pc/output [{:spacex/past-launches launch-out}]}
-  (go
+  (go-catch
     (->> (p.http/request env "https://api.spacexdata.com/v3/launches/past?limit=10"
-           {::p.http/accept ::p.http/json}) <!
+           {::p.http/accept ::p.http/json}) <?maybe
          ::p.http/body
          (mapv adapt-launch)
          (hash-map :spacex/past-launches))))
@@ -191,49 +191,39 @@
 (pc/defresolver upcoming-launches
   [env _]
   {::pc/output [{:spacex/upcoming-launches launch-out}]}
-  (go
+  (go-catch
     (->> (p.http/request env "https://api.spacexdata.com/v3/launches/upcoming"
-           {::p.http/accept ::p.http/json}) <!
+           {::p.http/accept ::p.http/json}) <?maybe
          ::p.http/body
          (mapv adapt-launch)
          (hash-map :spacex/upcoming-launches))))
 
-(pc/defresolver one-launch [_ _]
-  {::pc/input   #{:spacex.launch/flight-number}
-   ::pc/output  launch-out
-   ::pc/batch?  true
-   ::pc/resolve (pc/batch-resolver
-                  (fn [env inputs]
-                    (go
-                      (let [from-chan (async/chan 5)
-                            out-chan  (async/chan 5)]
-                        (async/onto-chan from-chan inputs)
-                        (async/pipeline-async 10
-                          out-chan
-                          (fn join-seq-pipeline [{:spacex.launch/keys [flight-number]} res-ch]
-                            (go
-                              (let [res
-                                    (->> (p.http/request env (str "https://api.spacexdata.com/v3/launches/" flight-number)
-                                           {::p.http/accept ::p.http/json}) <!
-                                         ::p.http/body
-                                         adapt-launch)]
-                                (async/>! res-ch res)
-                                (async/close! res-ch))))
-                          from-chan)
-                        (<! (async/into [] out-chan))))))})
+(pc/defresolver one-launch
+  [env {:spacex.launch/keys [flight-number]}]
+  {::pc/input     #{:spacex.launch/flight-number}
+   ::pc/output    launch-out
+   ::pc/transform (pc/transform-auto-batch 10)}
+  (go-catch
+    (->> (p.http/request env (str "https://api.spacexdata.com/v3/launches/" flight-number)
+           {::p.http/accept ::p.http/json}) <?maybe
+         ::p.http/body
+         adapt-launch)))
 
 (pc/defresolver latest-launch
   [env _]
   {::pc/output [{:spacex/latest-launch launch-out}]}
-  (go
+  (go-catch
     (->> (p.http/request env "https://api.spacexdata.com/v3/launches/latest"
-           {::p.http/accept ::p.http/json}) <!
+           {::p.http/accept ::p.http/json}) <?maybe
          ::p.http/body
          adapt-launch
          (hash-map :spacex/latest-launch))))
 
 (def resolvers
   [all-launches past-launches upcoming-launches one-launch latest-launch])
+
+(defn spacex-plugin []
+  {::pc/register resolvers})
 
 (comment
   (gstr/replaceAll "rocket_type" "_" "-")
@@ -248,11 +238,4 @@
 
   (-> launches first)
 
-  (-> latest-launch )
-
-  (go
-    (->> (p.http/request {::p.http/driver p.http.fetch/request-async}
-           "https://api.spacexdata.com/v3/launches/latest"
-           {::p.http/accept ::p.http/json}) <!
-         ::p.http/body
-         (def latest-launch))))
+  (-> latest-launch))
