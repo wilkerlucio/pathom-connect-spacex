@@ -1,5 +1,5 @@
 {
-  "name": "pathom-connect-youtube",
+  "name": "pathom-connect-spacex",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "npx shadow-cljs watch workspaces"
   },
   "author": "",
   "license": "ISC",
