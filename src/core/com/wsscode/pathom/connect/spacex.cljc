@@ -233,8 +233,7 @@
        (pc/data->shape))
 
   (->> launches
-       (mapv :links)
-       )
+       (mapv :links))
 
   (-> launches first)
 
